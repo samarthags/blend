@@ -3,18 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#080808" />
-
   <title>Blend — Real Time Music</title>
-
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
-
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
-
   <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
 </head>
 
 <body>
@@ -23,82 +14,52 @@
     <div class="onboard-hero">
       <div class="logo-mark">B</div>
       <h1>blend</h1>
-      <p class="tagline">
-        Two people. One synced queue.<br />
-        Local songs. Real-time vibe.
-      </p>
+      <p class="tagline">Two people. One synced queue.<br>Real-time music vibe.</p>
     </div>
 
     <div class="onboard-actions">
-      <button class="btn-main" type="button" onclick="App.showCreate()">
-        Create Blend Room
-      </button>
+      <button class="btn-main" onclick="App.showCreate()">Create Blend Room</button>
 
-      <div class="divider-or">
-        <span>or</span>
-      </div>
+      <div class="divider-or"><span>or</span></div>
 
       <div class="join-row">
-        <input
-          type="text"
-          id="join-code-input"
-          placeholder="Enter 6 digit code"
-          maxlength="6"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          autocomplete="off"
-          spellcheck="false"
-        />
-
-        <button class="btn-join" type="button" onclick="App.showJoin()">
-          Join
-        </button>
+        <input id="join-code-input" type="text" maxlength="6" inputmode="numeric" placeholder="Enter 6 digit code" autocomplete="off" />
+        <button class="btn-join" onclick="App.showJoin()">Join</button>
       </div>
     </div>
   </div>
 
   <div id="screen-setup" class="screen">
     <div class="screen-header">
-      <button class="back-btn" type="button" onclick="App.goBack()">←</button>
+      <button class="back-btn" onclick="App.goBack()">←</button>
       <span class="screen-title" id="setup-title">Create your profile</span>
     </div>
 
     <div class="setup-body">
-      <input type="file" id="avatar-file" accept="image/*" hidden />
+      <input type="file" id="avatar-file" hidden />
       <img id="avatar-preview" class="hidden" alt="" />
       <div id="avatar-placeholder" hidden></div>
 
       <div class="field">
-        <label class="field-label" for="name-input">Your name</label>
-        <input
-          type="text"
-          id="name-input"
-          class="field-input"
-          placeholder="e.g. Samartha"
-          maxlength="24"
-          autocomplete="name"
-        />
+        <label class="field-label">Your name</label>
+        <input id="name-input" class="field-input" type="text" maxlength="24" placeholder="e.g. Samartha" />
       </div>
 
       <div class="field">
         <label class="field-label">Add your songs</label>
-
-        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('song-file').click()">
+        <div class="upload-zone" onclick="document.getElementById('song-file').click()">
           <div class="upload-icon">♫</div>
-          <div class="upload-text">Tap to pick songs from your phone</div>
+          <div class="upload-text">Pick songs from your device</div>
           <div class="upload-sub">MP3 · M4A · WAV · FLAC</div>
         </div>
-
-        <input type="file" id="song-file" accept="audio/*" multiple hidden />
+        <input id="song-file" type="file" accept="audio/*" multiple hidden />
       </div>
 
-      <div id="storage-warning" class="mini-info">
-        Cloud use: 0 MB. Files delete after blend ends.
-      </div>
+      <div id="storage-warning" class="mini-info">Cloud use: 0 MB. Deleted after blend ends.</div>
 
       <div id="song-list" class="song-list"></div>
 
-      <button class="btn-main" id="btn-proceed" type="button" disabled onclick="App.proceed()">
+      <button class="btn-main" id="btn-proceed" disabled onclick="App.proceed()">
         <span id="btn-proceed-label">Continue →</span>
       </button>
     </div>
@@ -106,33 +67,27 @@
 
   <div id="screen-waiting" class="screen">
     <div class="screen-header">
-      <button class="back-btn" type="button" onclick="App.goBack()">←</button>
+      <button class="back-btn" onclick="App.goBack()">←</button>
       <span class="screen-title">Your Blend Room</span>
     </div>
 
     <div class="waiting-body">
       <div class="room-card">
         <div class="room-card-label">share this code</div>
-
         <div class="room-code" id="room-code-display">------</div>
 
-        <button class="copy-btn" type="button" onclick="App.copyCode()" id="copy-btn">
-          Copy Code
-        </button>
-
-        <button class="copy-btn" type="button" onclick="App.copyShareLink()" id="share-link-btn">
-          Copy Share Link
-        </button>
+        <button class="copy-btn" onclick="App.copyCode()">Copy Code</button>
+        <button class="copy-btn" onclick="App.copyShareLink()">Copy Share Link</button>
       </div>
 
-      <div class="waiting-status" id="waiting-status">
+      <div class="waiting-status">
         <div class="pulse-ring"></div>
         <div class="waiting-text">Waiting for your friend…</div>
-        <div class="waiting-sub">Send them the code or link</div>
+        <div class="waiting-sub">Send code or link</div>
       </div>
 
-      <div class="members-row" id="members-row">
-        <div class="member-chip you-chip" id="you-chip">
+      <div class="members-row">
+        <div class="member-chip you-chip">
           <div class="member-avatar you-av" id="you-av-small">?</div>
           <span id="you-name-label">You</span>
         </div>
@@ -158,31 +113,30 @@
       </div>
 
       <div class="live-badge">● LIVE</div>
-
-      <button class="copy-btn" type="button" id="end-blend-btn" onclick="App.endBlend()">
-        End Blend
-      </button>
+      <button class="copy-btn" id="end-blend-btn" onclick="App.endBlend()">End Blend</button>
     </div>
 
-    <div class="sync-status" id="sync-status">
-      Synced in real time
-    </div>
-
-    <div id="live-activity">
-      Live activity ready
-    </div>
+    <div class="sync-status" id="sync-status">Synced in real time</div>
+    <div id="live-activity">Live activity ready</div>
 
     <div class="blend-tools">
-      <button type="button" onclick="Player.voteSkip()">Vote Skip</button>
-      <button type="button" onclick="Player.toggleQueueMode()" id="queue-mode-btn">Balanced Queue</button>
-      <button type="button" onclick="App.downloadSummary()">Download Summary</button>
+      <button onclick="Player.voteSkip()">Vote Skip</button>
+      <button onclick="Player.toggleQueueMode()" id="queue-mode-btn">Balanced Queue</button>
     </div>
 
-    <div class="player-art" id="player-art">
+    <div class="reaction-row">
+      <button onclick="Reactions.send('🔥')">🔥</button>
+      <button onclick="Reactions.send('❤️')">❤️</button>
+      <button onclick="Reactions.send('🚀')">🚀</button>
+      <button onclick="Reactions.send('😭')">😭</button>
+    </div>
+
+    <div id="reaction-float"></div>
+
+    <div class="player-art">
       <div class="art-inner" id="art-inner">
         <div class="art-note">♫</div>
       </div>
-
       <div class="owner-tag" id="owner-tag">You</div>
     </div>
 
@@ -194,57 +148,31 @@
 
     <div class="progress-wrap">
       <span class="time-label" id="time-current">0:00</span>
-
       <div class="progress-bar">
         <div class="progress-fill" id="progress-fill"></div>
       </div>
-
       <span class="time-label" id="time-total">0:00</span>
     </div>
 
     <div class="controls">
-      <button class="ctrl" type="button" onclick="Player.prev()" aria-label="Previous">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"></path>
-        </svg>
+      <button class="ctrl" onclick="Player.prev()">⏮</button>
+
+      <button class="ctrl ctrl-play" id="btn-play" onclick="Player.togglePlay()">
+        <span id="icon-play">▶</span>
+        <span id="icon-pause" class="hidden">⏸</span>
       </button>
 
-      <button class="ctrl ctrl-play" id="btn-play" type="button" onclick="Player.togglePlay()" aria-label="Play or pause">
-        <svg id="icon-play" width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M8 5v14l11-7z"></path>
-        </svg>
-
-        <svg id="icon-pause" width="26" height="26" viewBox="0 0 24 24" fill="currentColor" class="hidden">
-          <path d="M6 19h4V5H6zm8-14v14h4V5z"></path>
-        </svg>
-      </button>
-
-      <button class="ctrl" type="button" onclick="Player.next()" aria-label="Next">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M6 18l8.5-6L6 6v12zm2-8.14 5.5 3.64L8 17.14V9.86zM16 6h2v12h-2z"></path>
-        </svg>
-      </button>
+      <button class="ctrl" onclick="Player.next()">⏭</button>
     </div>
 
     <div class="blend-stats">
-      <div>
-        <span id="stats-total">0</span>
-        <small>Total songs</small>
-      </div>
-
-      <div>
-        <span id="stats-current">1</span>
-        <small>Current</small>
-      </div>
-
-      <div>
-        <span id="stats-mode">Balanced</span>
-        <small>Mode</small>
-      </div>
+      <div><span id="stats-total">0</span><small>Total songs</small></div>
+      <div><span id="stats-current">1</span><small>Current</small></div>
+      <div><span id="stats-mode">Balanced</span><small>Mode</small></div>
     </div>
 
     <div class="queue-section">
-      <div class="queue-title">Up next in blend</div>
+      <div class="queue-title">Up next</div>
       <div id="queue-list" class="queue-list"></div>
     </div>
 
@@ -252,20 +180,11 @@
       <div class="queue-title">Mini Chat</div>
 
       <div id="chat-messages"></div>
-
       <div id="typing-status"></div>
 
       <div class="chat-input-row">
-        <input
-          id="chat-input"
-          type="text"
-          placeholder="Message your blend..."
-          maxlength="120"
-          oninput="Chat.typing()"
-          onkeydown="if(event.key === 'Enter') Chat.send()"
-        />
-
-        <button type="button" onclick="Chat.send()">Send</button>
+        <input id="chat-input" type="text" maxlength="120" placeholder="Message your blend..." oninput="Chat.typing()" onkeydown="if(event.key==='Enter') Chat.send()" />
+        <button onclick="Chat.send()">Send</button>
       </div>
     </div>
 
@@ -285,6 +204,5 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
-
 </body>
 </html>
