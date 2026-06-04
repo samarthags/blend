@@ -1,7 +1,3 @@
-// ══════════════════════════════════════════════════════
-// BLEND — Supabase realtime + synced playback + cleanup
-// ══════════════════════════════════════════════════════
-
 'use strict';
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -32,13 +28,21 @@ function stripExt(n) {
 }
 
 function initials(n) {
-  return (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  return (n || '?')
+    .split(' ')
+    .map(w => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 function toast(msg, duration = 2500) {
   const el = document.getElementById('toast');
+  if (!el) return;
+
   el.textContent = msg;
   el.classList.add('show');
+
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.remove('show'), duration);
 }
@@ -50,29 +54,123 @@ function showScreen(id) {
 
 function setLoading(show, text = 'Connecting…') {
   const el = document.getElementById('loading');
-  document.getElementById('loading-text').textContent = text;
-  el.classList.toggle('hidden', !show);
+  const txt = document.getElementById('loading-text');
+
+  if (txt) txt.textContent = text;
+  if (el) el.classList.toggle('hidden', !show);
 }
 
 function saveProfile() {
   localStorage.setItem('blend_profile', JSON.stringify({
     name: State.userName,
-    avatar: State.avatarUrl,
   }));
 }
 
 function loadProfile() {
   try {
     const saved = JSON.parse(localStorage.getItem('blend_profile') || '{}');
-    if (saved.name) document.getElementById('name-input').value = saved.name;
-    if (saved.avatar) {
-      State.avatarUrl = saved.avatar;
-      document.getElementById('avatar-preview').src = saved.avatar;
-      document.getElementById('avatar-preview').classList.remove('hidden');
-      document.getElementById('avatar-placeholder').style.display = 'none';
+    if (saved.name) {
+      document.getElementById('name-input').value = saved.name;
     }
   } catch {}
 }
+
+function saveLastRoom() {
+  localStorage.setItem('last_blend_room', JSON.stringify({
+    code: State.roomCode,
+    userId: State.userId,
+    userName: State.userName,
+    time: Date.now(),
+  }));
+}
+
+function clearLastRoom() {
+  localStorage.removeItem('last_blend_room');
+}
+
+function estimateStorage() {
+  const total = State.songs.reduce((sum, s) => sum + (s.file?.size || 0), 0);
+  const mb = total / 1024 / 1024;
+
+  const el = document.getElementById('storage-warning');
+  if (el) {
+    el.textContent = `Cloud use: ${mb.toFixed(1)} MB. Files delete after blend ends.`;
+  }
+
+  return mb;
+}
+
+async function setActivity(text) {
+  const el = document.getElementById('live-activity');
+  if (el) el.textContent = text;
+
+  if (!State.roomCode) return;
+
+  await sb.from('rooms').update({
+    activity: {
+      text,
+      by: State.userName,
+      at: Date.now(),
+    },
+  }).eq('code', State.roomCode);
+}
+
+const QueueBuilder = {
+  mode: 'balanced',
+
+  build(room) {
+    const aS = (room.user_a_songs || []).map(s => ({
+      ...s,
+      owner: room.user_a_name,
+      slot: 'A',
+    }));
+
+    const bS = (room.user_b_songs || []).map(s => ({
+      ...s,
+      owner: room.user_b_name,
+      slot: 'B',
+    }));
+
+    if (QueueBuilder.mode === 'smart') {
+      return QueueBuilder.smart(aS, bS);
+    }
+
+    return QueueBuilder.balanced(aS, bS);
+  },
+
+  balanced(aS, bS) {
+    const queue = [];
+    const max = Math.max(aS.length, bS.length);
+
+    for (let i = 0; i < max; i++) {
+      if (aS[i]) queue.push(aS[i]);
+      if (bS[i]) queue.push(bS[i]);
+    }
+
+    return queue;
+  },
+
+  smart(aS, bS) {
+    const queue = [];
+
+    const shortA = [...aS].sort((a, b) => (a.duration || 0) - (b.duration || 0));
+    const shortB = [...bS].sort((a, b) => (a.duration || 0) - (b.duration || 0));
+
+    const max = Math.max(shortA.length, shortB.length);
+
+    for (let i = 0; i < max; i++) {
+      if (i % 2 === 0) {
+        if (shortA[i]) queue.push(shortA[i]);
+        if (shortB[i]) queue.push(shortB[i]);
+      } else {
+        if (shortB[i]) queue.push(shortB[i]);
+        if (shortA[i]) queue.push(shortA[i]);
+      }
+    }
+
+    return queue;
+  },
+};
 
 const App = {
   init() {
@@ -80,12 +178,27 @@ const App = {
 
     const params = new URLSearchParams(location.search);
     const room = params.get('room');
+
     if (room && /^\d{6}$/.test(room)) {
       document.getElementById('join-code-input').value = room;
       toast('Room code loaded from link');
     }
 
+    try {
+      const last = JSON.parse(localStorage.getItem('last_blend_room') || '{}');
+
+      if (!room && last.code && Date.now() - last.time < 1000 * 60 * 60 * 24) {
+        const ok = confirm(`Rejoin last blend room ${last.code}?`);
+
+        if (ok) {
+          document.getElementById('join-code-input').value = last.code;
+          toast('Last room loaded');
+        }
+      }
+    } catch {}
+
     App._checkReady();
+    estimateStorage();
   },
 
   showCreate() {
@@ -97,6 +210,7 @@ const App = {
 
   showJoin() {
     const code = document.getElementById('join-code-input').value.trim();
+
     if (!/^\d{6}$/.test(code)) {
       toast('Enter valid 6 digit room code');
       return;
@@ -104,8 +218,10 @@ const App = {
 
     State.userId = 'B';
     State.roomCode = code;
+
     document.getElementById('setup-title').textContent = 'Join the blend';
     document.getElementById('btn-proceed-label').textContent = 'Join room →';
+
     showScreen('screen-setup');
   },
 
@@ -115,6 +231,7 @@ const App = {
 
   async proceed() {
     const name = document.getElementById('name-input').value.trim();
+
     if (!name || State.songs.length === 0) return;
 
     State.userName = name;
@@ -123,17 +240,20 @@ const App = {
     setLoading(true, State.userId === 'A' ? 'Creating room…' : 'Joining room…');
 
     try {
-      if (State.userId === 'A') await App._createRoom(name);
-      else await App._joinRoom(name);
+      if (State.userId === 'A') {
+        await App._createRoom(name);
+      } else {
+        await App._joinRoom(name);
+      }
     } catch (e) {
       console.error(e);
-      toast('Error: ' + e.message);
       setLoading(false);
+      toast('Error: ' + e.message);
     }
   },
 
   async _createRoom(name) {
-    let code = genCode();
+    const code = genCode();
     State.roomCode = code;
 
     const songMeta = await App._uploadSongs('A');
@@ -142,9 +262,15 @@ const App = {
       code,
       user_a_name: name,
       user_a_songs: songMeta,
-      user_a_avatar: State.avatarUrl,
+      user_a_avatar: null,
       status: 'waiting',
       playback_state: null,
+      queue_mode: 'balanced',
+      activity: {
+        text: `${name} created the blend`,
+        by: name,
+        at: Date.now(),
+      },
       created_at: new Date().toISOString(),
     });
 
@@ -153,9 +279,11 @@ const App = {
     State.shareLink = `${location.origin}${location.pathname}?room=${code}`;
 
     setLoading(false);
+
     App._showWaiting(code, name);
     App._subscribeRoom(code);
     App._setupPresence(code);
+    saveLastRoom();
   },
 
   async _joinRoom(name) {
@@ -174,8 +302,13 @@ const App = {
     const { error: err2 } = await sb.from('rooms').update({
       user_b_name: name,
       user_b_songs: songMeta,
-      user_b_avatar: State.avatarUrl,
+      user_b_avatar: null,
       status: 'playing',
+      activity: {
+        text: `${name} joined the blend`,
+        by: name,
+        at: Date.now(),
+      },
     }).eq('code', code);
 
     if (err2) throw err2;
@@ -189,8 +322,12 @@ const App = {
       status: 'playing',
     };
 
+    QueueBuilder.mode = data.queue_mode || 'balanced';
+
     App._subscribeRoom(code);
     App._setupPresence(code);
+    saveLastRoom();
+
     Player.start(State.roomData, 'B');
   },
 
@@ -217,6 +354,7 @@ const App = {
         duration: song.duration || 0,
         url: urlData.publicUrl,
         storageKey: key,
+        size: song.file.size || 0,
       });
     }
 
@@ -228,40 +366,9 @@ const App = {
     document.getElementById('you-name-label').textContent = name;
 
     const avEl = document.getElementById('you-av-small');
-    avEl.textContent = initials(name);
-
-    App._injectShareUI();
+    if (avEl) avEl.textContent = initials(name);
 
     showScreen('screen-waiting');
-  },
-
-  _injectShareUI() {
-    if (document.getElementById('share-link-btn')) return;
-
-    const card = document.querySelector('.room-card');
-
-    const btn = document.createElement('button');
-    btn.id = 'share-link-btn';
-    btn.className = 'copy-btn';
-    btn.style.marginTop = '10px';
-    btn.textContent = 'Copy share link';
-    btn.onclick = App.copyShareLink;
-
-    card.appendChild(btn);
-  },
-
-  _injectEndButton() {
-    if (document.getElementById('end-blend-btn')) return;
-
-    const top = document.querySelector('.player-top');
-
-    const btn = document.createElement('button');
-    btn.id = 'end-blend-btn';
-    btn.className = 'copy-btn';
-    btn.textContent = 'End Blend';
-    btn.onclick = App.endBlend;
-
-    top.appendChild(btn);
   },
 
   _subscribeRoom(code) {
@@ -277,21 +384,27 @@ const App = {
         const room = payload.new;
         State.roomData = room;
 
-        if (room.status === 'ended') {
-          toast('Blend ended');
-          Player.stop();
-          showScreen('screen-onboard');
-          return;
+        if (room.activity?.text) {
+          const el = document.getElementById('live-activity');
+          if (el) el.textContent = room.activity.text;
+        }
+
+        if (room.queue_mode) {
+          QueueBuilder.mode = room.queue_mode;
+          Player.updateModeUI();
         }
 
         if (room.status === 'playing' && State.userId === 'A' && !Player.active) {
           const chip = document.getElementById('friend-chip');
-          chip.classList.remove('faded');
-          chip.classList.add('arrived');
-          chip.querySelector('.member-avatar').textContent = initials(room.user_b_name);
-          chip.querySelector('span:last-child').textContent = room.user_b_name;
 
-          setTimeout(() => Player.start(room, 'A'), 800);
+          if (chip) {
+            chip.classList.remove('faded');
+            chip.classList.add('arrived');
+            chip.querySelector('.member-avatar').textContent = initials(room.user_b_name);
+            chip.querySelector('span:last-child').textContent = room.user_b_name;
+          }
+
+          setTimeout(() => Player.start(room, 'A'), 700);
         }
 
         if (room.playback_state && Player.active) {
@@ -305,14 +418,20 @@ const App = {
     if (State.presenceChannel) sb.removeChannel(State.presenceChannel);
 
     State.presenceChannel = sb.channel(`presence-${code}`, {
-      config: { presence: { key: `${State.userId}-${Date.now()}` } },
+      config: {
+        presence: {
+          key: `${State.userId}-${Date.now()}`,
+        },
+      },
     });
 
     State.presenceChannel
       .on('presence', { event: 'sync' }, () => {
         const state = State.presenceChannel.presenceState();
         const count = Object.keys(state).length;
-        if (count > 1) toast(`${count} devices online`, 1200);
+        const sync = document.getElementById('sync-status');
+
+        if (sync) sync.textContent = `${count} device${count === 1 ? '' : 's'} online`;
       })
       .subscribe(async status => {
         if (status === 'SUBSCRIBED') {
@@ -326,9 +445,8 @@ const App = {
   },
 
   copyCode() {
-    const code = State.roomCode;
-    navigator.clipboard?.writeText(code);
-    toast(`Code ${code} copied`);
+    navigator.clipboard?.writeText(State.roomCode);
+    toast(`Code ${State.roomCode} copied`);
   },
 
   copyShareLink() {
@@ -337,135 +455,204 @@ const App = {
     toast('Share link copied');
   },
 
+  downloadSummary() {
+    const room = State.roomData;
+    if (!room) return;
+
+    const totalSongs = Player.queue.length;
+    const played = Math.min(Player.idx + 1, totalSongs);
+
+    const summary = `
+BLEND SUMMARY
+
+Room Code: ${State.roomCode}
+
+Users:
+${room.user_a_name || 'User A'}
+${room.user_b_name || 'User B'}
+
+Total Songs: ${totalSongs}
+Played Till: ${played}
+
+Queue Mode: ${QueueBuilder.mode}
+
+Ended By: ${State.userName || 'Not ended yet'}
+Time: ${new Date().toLocaleString()}
+
+NOTE:
+Cloud songs, chats, votes, and room data are deleted after ending blend.
+`;
+
+    const blob = new Blob([summary], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `blend-summary-${State.roomCode}.txt`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+  },
+
   async endBlend() {
     if (!State.roomData) return;
 
-    setLoading(true, 'Ending blend…');
+    const cleanup = document.getElementById('cleanup-screen');
+    const text = document.getElementById('cleanup-text');
+
+    if (cleanup) cleanup.classList.remove('hidden');
+    if (text) text.textContent = 'Deleting songs from cloud...';
+
+    setLoading(true, 'Ending blend...');
 
     try {
-      await App._deleteRoomFiles(State.roomData);
+      const room = State.roomData;
 
-      await sb.from('rooms').update({
-        status: 'ended',
-        user_a_songs: [],
-        user_b_songs: [],
-        playback_state: null,
-        ended_at: new Date().toISOString(),
-        ended_by: State.userName,
-      }).eq('code', State.roomCode);
+      App.downloadSummary();
+
+      const paths = [];
+
+      [...(room.user_a_songs || []), ...(room.user_b_songs || [])].forEach(song => {
+        if (song.storageKey) paths.push(song.storageKey);
+      });
+
+      if (paths.length) {
+        const { error: removeError } = await sb.storage.from(STORAGE_BUCKET).remove(paths);
+        if (removeError) console.warn(removeError.message);
+      }
+
+      if (text) text.textContent = 'Deleting chats and votes...';
+
+      await sb.from('blend_messages').delete().eq('room_code', State.roomCode);
+      await sb.from('blend_votes').delete().eq('room_code', State.roomCode);
+
+      if (text) text.textContent = 'Deleting room data...';
+
+      await sb.from('rooms').delete().eq('code', State.roomCode);
+
+      clearLastRoom();
+
+      Player.stop();
+      Chat.stop();
+
+      if (State.channel) sb.removeChannel(State.channel);
+      if (State.presenceChannel) sb.removeChannel(State.presenceChannel);
+
+      if (text) text.textContent = 'Done. Everything deleted from Supabase.';
 
       setLoading(false);
-      toast('Blend ended and songs deleted');
-      Player.stop();
-      showScreen('screen-onboard');
+      toast('Blend ended. Cloud cleaned.');
+
+      setTimeout(() => {
+        showScreen('screen-onboard');
+      }, 1000);
+
     } catch (e) {
       console.error(e);
       setLoading(false);
-      toast('Could not fully delete: ' + e.message);
-    }
-  },
-
-  async _deleteRoomFiles(room) {
-    const paths = [];
-
-    [...(room.user_a_songs || []), ...(room.user_b_songs || [])].forEach(s => {
-      if (s.storageKey) paths.push(s.storageKey);
-    });
-
-    if (paths.length > 0) {
-      const { error } = await sb.storage.from(STORAGE_BUCKET).remove(paths);
-      if (error) console.warn(error.message);
+      toast('Cleanup error: ' + e.message);
     }
   },
 
   _checkReady() {
     const name = (document.getElementById('name-input')?.value || '').trim();
     const btn = document.getElementById('btn-proceed');
+
     if (btn) btn.disabled = !(name && State.songs.length > 0);
   },
 };
 
-// UI events
-document.getElementById('name-input').addEventListener('input', App._checkReady);
+const Chat = {
+  channel: null,
+  typingTimer: null,
 
-document.getElementById('avatar-file').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
+  start(roomCode) {
+    Chat.stop();
+    Chat.load(roomCode);
 
-  const reader = new FileReader();
-  reader.onload = ev => {
-    State.avatarUrl = ev.target.result;
-    const prev = document.getElementById('avatar-preview');
-    const ph = document.getElementById('avatar-placeholder');
+    Chat.channel = sb.channel(`chat-${roomCode}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'blend_messages',
+        filter: `room_code=eq.${roomCode}`,
+      }, payload => {
+        Chat.renderMessage(payload.new);
+      })
+      .on('broadcast', { event: 'typing' }, payload => {
+        if (payload.payload.user !== State.userName) {
+          const el = document.getElementById('typing-status');
+          if (el) el.textContent = `${payload.payload.user} is typing...`;
 
-    prev.src = ev.target.result;
-    prev.classList.remove('hidden');
-    ph.style.display = 'none';
-  };
+          clearTimeout(Chat.typingTimer);
+          Chat.typingTimer = setTimeout(() => {
+            if (el) el.textContent = '';
+          }, 1200);
+        }
+      })
+      .subscribe();
+  },
 
-  reader.readAsDataURL(file);
-});
+  stop() {
+    if (Chat.channel) {
+      sb.removeChannel(Chat.channel);
+      Chat.channel = null;
+    }
+  },
 
-document.getElementById('song-file').addEventListener('change', e => {
-  const files = Array.from(e.target.files);
+  async load(roomCode) {
+    const { data } = await sb
+      .from('blend_messages')
+      .select('*')
+      .eq('room_code', roomCode)
+      .order('created_at', { ascending: true });
 
-  files.forEach(file => {
-    const url = URL.createObjectURL(file);
-    const audio = new Audio();
-    audio.src = url;
+    const box = document.getElementById('chat-messages');
+    if (box) box.innerHTML = '';
 
-    audio.addEventListener('loadedmetadata', () => {
-      State.songs.push({
-        name: stripExt(file.name),
-        duration: audio.duration,
-        file,
-        localUrl: url,
-      });
+    (data || []).forEach(Chat.renderMessage);
+  },
 
-      renderSongList();
-      App._checkReady();
+  async send() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+
+    const msg = input.value.trim();
+    if (!msg) return;
+
+    input.value = '';
+
+    await sb.from('blend_messages').insert({
+      room_code: State.roomCode,
+      user_name: State.userName,
+      message: msg,
     });
 
-    audio.addEventListener('error', () => {
-      State.songs.push({
-        name: stripExt(file.name),
-        duration: 0,
-        file,
-        localUrl: url,
-      });
+    setActivity(`${State.userName} sent a message`);
+  },
 
-      renderSongList();
-      App._checkReady();
+  typing() {
+    if (!Chat.channel) return;
+
+    Chat.channel.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        user: State.userName,
+      },
     });
-  });
+  },
 
-  e.target.value = '';
-});
+  renderMessage(m) {
+    const box = document.getElementById('chat-messages');
+    if (!box) return;
 
-document.getElementById('join-code-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') App.showJoin();
-});
-
-function renderSongList() {
-  const list = document.getElementById('song-list');
-
-  list.innerHTML = State.songs.map((s, i) => `
-    <div class="song-item">
-      <div class="song-thumb">♪</div>
-      <div class="song-info">
-        <div class="song-name">${s.name}</div>
-        <div class="song-dur">${s.duration ? fmtTime(s.duration) : '—'}</div>
-      </div>
-      <button class="song-remove" onclick="removeSong(${i})">×</button>
-    </div>
-  `).join('');
-}
-
-function removeSong(i) {
-  State.songs.splice(i, 1);
-  renderSongList();
-  App._checkReady();
-}
+    const div = document.createElement('div');
+    div.innerHTML = `<b>${m.user_name}:</b> ${m.message}`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  },
+};
 
 const Player = {
   active: false,
@@ -481,18 +668,10 @@ const Player = {
     Player.active = true;
     Player.mySlot = mySlot;
 
-    const aS = (room.user_a_songs || []).map(s => ({ ...s, owner: room.user_a_name, slot: 'A' }));
-    const bS = (room.user_b_songs || []).map(s => ({ ...s, owner: room.user_b_name, slot: 'B' }));
+    QueueBuilder.mode = room.queue_mode || QueueBuilder.mode || 'balanced';
+    Player.queue = QueueBuilder.build(room);
 
-    Player.queue = [];
-
-    const len = Math.max(aS.length, bS.length);
-    for (let i = 0; i < len; i++) {
-      if (aS[i]) Player.queue.push(aS[i]);
-      if (bS[i]) Player.queue.push(bS[i]);
-    }
-
-    if (Player.queue.length === 0) {
+    if (!Player.queue.length) {
       toast('No songs found');
       return;
     }
@@ -504,26 +683,43 @@ const Player = {
       mySlot === 'A' ? room.user_b_name : room.user_a_name;
 
     showScreen('screen-player');
-    App._injectEndButton();
 
+    Player.updateModeUI();
     Player._setupAudioEvents();
     Player._loadTrack(0);
     Player._play();
+
+    Chat.start(State.roomCode);
+    estimateStorage();
+    saveLastRoom();
 
     clearInterval(Player.syncTimer);
     Player.syncTimer = setInterval(() => {
       if (Player.active && Player.isPlaying) Player._broadcastState('sync');
     }, 1200);
+
+    setActivity(`${State.userName} started listening`);
   },
 
   stop() {
     Player.active = false;
     Player.audio.pause();
     Player.audio.src = '';
+    Player.isPlaying = false;
     clearInterval(Player.syncTimer);
   },
 
+  updateModeUI() {
+    const btn = document.getElementById('queue-mode-btn');
+    const stats = document.getElementById('stats-mode');
+
+    if (btn) btn.textContent = QueueBuilder.mode === 'smart' ? 'Smart Queue' : 'Balanced Queue';
+    if (stats) stats.textContent = QueueBuilder.mode === 'smart' ? 'Smart' : 'Balanced';
+  },
+
   _loadTrack(i) {
+    if (!Player.queue.length) return;
+
     if (i >= Player.queue.length) i = 0;
     if (i < 0) i = Player.queue.length - 1;
 
@@ -544,13 +740,21 @@ const Player = {
     const art = document.getElementById('art-inner');
     const tag = document.getElementById('owner-tag');
 
-    art.className = 'art-inner spinning ' + (isYou ? 'you-art' : 'friend-art');
-    tag.className = 'owner-tag ' + (isYou ? 'you-tag' : 'friend-tag');
-    tag.textContent = isYou ? 'You' : track.owner;
+    if (art) art.className = 'art-inner spinning ' + (isYou ? 'you-art' : 'friend-art');
+    if (tag) {
+      tag.className = 'owner-tag ' + (isYou ? 'you-tag' : 'friend-tag');
+      tag.textContent = isYou ? 'You' : track.owner;
+    }
 
     document.getElementById('progress-fill').style.width = '0%';
     document.getElementById('time-current').textContent = '0:00';
     document.getElementById('time-total').textContent = fmtTime(track.duration || 0);
+
+    const total = document.getElementById('stats-total');
+    const current = document.getElementById('stats-current');
+
+    if (total) total.textContent = Player.queue.length;
+    if (current) current.textContent = Player.idx + 1;
 
     Player._renderQueue();
   },
@@ -563,6 +767,7 @@ const Player = {
       if (!Player.audio.duration) return;
 
       const pct = (Player.audio.currentTime / Player.audio.duration) * 100;
+
       document.getElementById('progress-fill').style.width = pct.toFixed(2) + '%';
       document.getElementById('time-current').textContent = fmtTime(Player.audio.currentTime);
       document.getElementById('time-total').textContent = fmtTime(Player.audio.duration);
@@ -585,7 +790,9 @@ const Player = {
 
     document.getElementById('icon-play').classList.add('hidden');
     document.getElementById('icon-pause').classList.remove('hidden');
-    document.getElementById('art-inner').classList.add('spinning');
+
+    const art = document.getElementById('art-inner');
+    if (art) art.classList.add('spinning');
   },
 
   _pause() {
@@ -594,39 +801,95 @@ const Player = {
 
     document.getElementById('icon-play').classList.remove('hidden');
     document.getElementById('icon-pause').classList.add('hidden');
-    document.getElementById('art-inner').classList.remove('spinning');
+
+    const art = document.getElementById('art-inner');
+    if (art) art.classList.remove('spinning');
   },
 
   togglePlay() {
     if (Player.isPlaying) {
       Player._pause();
       Player._broadcastState('pause');
+      setActivity(`${State.userName} paused song`);
     } else {
       Player._play();
       Player._broadcastState('play');
+      setActivity(`${State.userName} resumed song`);
     }
   },
 
   next() {
     Player._loadTrack(Player.idx + 1);
+
     if (Player.isPlaying) Player._play();
+
     Player._broadcastState('next');
+    setActivity(`${State.userName} skipped to next song`);
   },
 
   prev() {
     if (Player.audio.currentTime > 3) {
       Player.audio.currentTime = 0;
       Player._broadcastState('seek');
+      setActivity(`${State.userName} restarted the song`);
       return;
     }
 
     Player._loadTrack(Player.idx - 1);
+
     if (Player.isPlaying) Player._play();
+
     Player._broadcastState('prev');
+    setActivity(`${State.userName} went to previous song`);
+  },
+
+  async toggleQueueMode() {
+    QueueBuilder.mode = QueueBuilder.mode === 'balanced' ? 'smart' : 'balanced';
+
+    await sb.from('rooms').update({
+      queue_mode: QueueBuilder.mode,
+    }).eq('code', State.roomCode);
+
+    Player.queue = QueueBuilder.build(State.roomData);
+    Player._loadTrack(0);
+    Player.updateModeUI();
+
+    setActivity(`${State.userName} changed queue to ${QueueBuilder.mode}`);
+    toast(`${QueueBuilder.mode} queue enabled`);
+  },
+
+  async voteSkip() {
+    await sb.from('blend_votes').insert({
+      room_code: State.roomCode,
+      track_idx: Player.idx,
+      user_id: State.userId,
+      vote_type: 'skip',
+    });
+
+    const { data } = await sb
+      .from('blend_votes')
+      .select('*')
+      .eq('room_code', State.roomCode)
+      .eq('track_idx', Player.idx)
+      .eq('vote_type', 'skip');
+
+    const unique = new Set((data || []).map(v => v.user_id));
+
+    if (unique.size >= 2) {
+      await sb.from('blend_votes').delete().eq('room_code', State.roomCode);
+
+      Player.next();
+      setActivity('Both voted skip. Next song started.');
+    } else {
+      setActivity(`${State.userName} voted to skip`);
+      toast('Skip vote added');
+    }
   },
 
   _renderQueue() {
     const list = document.getElementById('queue-list');
+    if (!list) return;
+
     const upcoming = Player.queue.slice(Player.idx + 1, Player.idx + 5);
 
     if (!upcoming.length) {
@@ -636,6 +899,7 @@ const Player = {
 
     list.innerHTML = upcoming.map(t => {
       const isYou = t.slot === Player.mySlot;
+
       return `
         <div class="queue-item">
           <div class="queue-dot"></div>
@@ -692,6 +956,77 @@ const Player = {
     }, 300);
   },
 };
+
+document.getElementById('name-input').addEventListener('input', App._checkReady);
+
+document.getElementById('song-file').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+
+  files.forEach(file => {
+    const url = URL.createObjectURL(file);
+    const audio = new Audio();
+
+    audio.src = url;
+
+    audio.addEventListener('loadedmetadata', () => {
+      State.songs.push({
+        name: stripExt(file.name),
+        duration: audio.duration,
+        file,
+        localUrl: url,
+      });
+
+      renderSongList();
+      estimateStorage();
+      App._checkReady();
+    });
+
+    audio.addEventListener('error', () => {
+      State.songs.push({
+        name: stripExt(file.name),
+        duration: 0,
+        file,
+        localUrl: url,
+      });
+
+      renderSongList();
+      estimateStorage();
+      App._checkReady();
+    });
+  });
+
+  e.target.value = '';
+});
+
+document.getElementById('join-code-input').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+});
+
+document.getElementById('join-code-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') App.showJoin();
+});
+
+function renderSongList() {
+  const list = document.getElementById('song-list');
+
+  list.innerHTML = State.songs.map((s, i) => `
+    <div class="song-item">
+      <div class="song-thumb">♪</div>
+      <div class="song-info">
+        <div class="song-name">${s.name}</div>
+        <div class="song-dur">${s.duration ? fmtTime(s.duration) : '—'}</div>
+      </div>
+      <button class="song-remove" onclick="removeSong(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function removeSong(i) {
+  State.songs.splice(i, 1);
+  renderSongList();
+  estimateStorage();
+  App._checkReady();
+}
 
 window.addEventListener('beforeunload', () => {
   if (State.presenceChannel) {
