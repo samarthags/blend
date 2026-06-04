@@ -1,45 +1,41 @@
 // ══════════════════════════════════════════════════════
-//  BLEND — Main Application v2
-//  Features:
-//  - Numeric room codes only
-//  - Shareable links (auto-fill code from URL)
-//  - Real-time pause/play sync with name notification
-//  - Multiple listeners (observers) beyond 2 hosts
-//  - Auto-delete room & songs on end/leave
-//  - LocalStorage caching for resilience
-//  - Cleanup on tab close
+// BLEND — Supabase realtime + synced playback + cleanup
 // ══════════════════════════════════════════════════════
 
 'use strict';
 
-// ── Supabase client ──────────────────────────────────
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
-// ── State ────────────────────────────────────────────
 const State = {
-  roomCode:   null,
-  userId:     null,       // 'A', 'B', or 'listener'
-  userName:   null,
-  avatarUrl:  null,
-  songs:      [],         // [{name, duration, file, localUrl}]
-  roomData:   null,
-  channel:    null,
-  listenerId: null,       // for observer listeners
+  roomCode: null,
+  userId: null,
+  userName: null,
+  avatarUrl: null,
+  songs: [],
+  roomData: null,
+  channel: null,
+  presenceChannel: null,
+  shareLink: null,
 };
 
-// ── Utils ────────────────────────────────────────────
-function genNumericCode() {
-  // 6-digit numeric code
-  return String(Math.floor(100000 + Math.random() * 900000));
+function genCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
+
 function fmtTime(s) {
   s = Math.floor(s || 0);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
-function stripExt(n) { return n.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' '); }
-function initials(n) { return (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2); }
 
-function toast(msg, duration = 2800) {
+function stripExt(n) {
+  return n.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+}
+
+function initials(n) {
+  return (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function toast(msg, duration = 2500) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
@@ -53,85 +49,43 @@ function showScreen(id) {
 }
 
 function setLoading(show, text = 'Connecting…') {
+  const el = document.getElementById('loading');
   document.getElementById('loading-text').textContent = text;
-  document.getElementById('loading').classList.toggle('hidden', !show);
+  el.classList.toggle('hidden', !show);
 }
 
-// ── LocalStorage helpers ─────────────────────────────
-const LS = {
-  save(key, val) { try { localStorage.setItem('blend_' + key, JSON.stringify(val)); } catch(e) {} },
-  load(key, def = null) { try { const v = localStorage.getItem('blend_' + key); return v ? JSON.parse(v) : def; } catch(e) { return def; } },
-  remove(key) { try { localStorage.removeItem('blend_' + key); } catch(e) {} },
-};
-
-// ── URL / Share helpers ──────────────────────────────
-function getInviteCode() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('code') || params.get('room') || null;
+function saveProfile() {
+  localStorage.setItem('blend_profile', JSON.stringify({
+    name: State.userName,
+    avatar: State.avatarUrl,
+  }));
 }
 
-function buildShareUrl(code) {
-  const base = window.location.origin + window.location.pathname;
-  return `${base}?code=${code}`;
+function loadProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('blend_profile') || '{}');
+    if (saved.name) document.getElementById('name-input').value = saved.name;
+    if (saved.avatar) {
+      State.avatarUrl = saved.avatar;
+      document.getElementById('avatar-preview').src = saved.avatar;
+      document.getElementById('avatar-preview').classList.remove('hidden');
+      document.getElementById('avatar-placeholder').style.display = 'none';
+    }
+  } catch {}
 }
 
-function clearUrlParams() {
-  const url = window.location.pathname;
-  window.history.replaceState({}, '', url);
-}
-
-// ── App controller ───────────────────────────────────
 const App = {
-
   init() {
-    // Check for invite code in URL
-    const inviteCode = getInviteCode();
-    if (inviteCode && /^\d{4,6}$/.test(inviteCode)) {
-      document.getElementById('join-code-input').value = inviteCode;
-      document.getElementById('share-join-hint').style.display = '';
-      clearUrlParams();
+    loadProfile();
+
+    const params = new URLSearchParams(location.search);
+    const room = params.get('room');
+    if (room && /^\d{6}$/.test(room)) {
+      document.getElementById('join-code-input').value = room;
+      toast('Room code loaded from link');
     }
 
-    // Volume slider init
-    const volSlider = document.getElementById('volume-slider');
-    if (volSlider) {
-      const savedVol = LS.load('volume', 100);
-      volSlider.value = savedVol;
-      Player.audio.volume = savedVol / 100;
-      App._updateVolumeSlider(savedVol);
-      volSlider.addEventListener('input', e => {
-        const v = parseInt(e.target.value);
-        Player.audio.volume = v / 100;
-        LS.save('volume', v);
-        App._updateVolumeSlider(v);
-      });
-    }
-
-    // Progress bar click to seek
-    document.getElementById('progress-bar-click').addEventListener('click', e => {
-      if (!Player.active || !Player.audio.duration) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const pct = (e.clientX - rect.left) / rect.width;
-      Player.audio.currentTime = pct * Player.audio.duration;
-      Player._broadcastState();
-    });
-
-    // Beforeunload: cleanup
-    window.addEventListener('beforeunload', () => {
-      App._cleanupOnLeave(false);
-    });
-
-    // Numeric-only enforcement for join input
-    document.getElementById('join-code-input').addEventListener('input', e => {
-      e.target.value = e.target.value.replace(/\D/g, '');
-    });
-  },
-
-  _updateVolumeSlider(v) {
-    const slider = document.getElementById('volume-slider');
-    if (slider) {
-      slider.style.background = `linear-gradient(to right, var(--you) ${v}%, var(--bg3) ${v}%)`;
-    }
+    App._checkReady();
   },
 
   showCreate() {
@@ -143,10 +97,12 @@ const App = {
 
   showJoin() {
     const code = document.getElementById('join-code-input').value.trim();
-    if (code.length < 4 || !/^\d+$/.test(code)) {
-      toast('Enter a numeric room code'); return;
+    if (!/^\d{6}$/.test(code)) {
+      toast('Enter valid 6 digit room code');
+      return;
     }
-    State.userId   = 'B';
+
+    State.userId = 'B';
     State.roomCode = code;
     document.getElementById('setup-title').textContent = 'Join the blend';
     document.getElementById('btn-proceed-label').textContent = 'Join room →';
@@ -155,28 +111,20 @@ const App = {
 
   goBack() {
     showScreen('screen-onboard');
-    State.songs = [];
-    State.userId = null;
-    State.roomCode = null;
-    document.getElementById('song-list').innerHTML = '';
-    document.getElementById('name-input').value = '';
-    const prev = document.getElementById('avatar-preview');
-    prev.classList.add('hidden');
-    document.getElementById('avatar-placeholder').style.display = '';
-    App._checkReady();
   },
 
   async proceed() {
     const name = document.getElementById('name-input').value.trim();
     if (!name || State.songs.length === 0) return;
+
     State.userName = name;
+    saveProfile();
+
     setLoading(true, State.userId === 'A' ? 'Creating room…' : 'Joining room…');
+
     try {
-      if (State.userId === 'A') {
-        await App._createRoom(name);
-      } else {
-        await App._joinRoom(name);
-      }
+      if (State.userId === 'A') await App._createRoom(name);
+      else await App._joinRoom(name);
     } catch (e) {
       console.error(e);
       toast('Error: ' + e.message);
@@ -185,97 +133,141 @@ const App = {
   },
 
   async _createRoom(name) {
-    const code = genNumericCode();
+    let code = genCode();
     State.roomCode = code;
 
-    // Store songs locally — no Supabase storage uploads
-    const songMeta = State.songs.map(s => ({
-      name: s.name,
-      duration: s.duration,
-      // No URL — loaded from local file
-    }));
+    const songMeta = await App._uploadSongs('A');
 
-    // Save to Supabase room table (metadata only)
     const { error } = await sb.from('rooms').insert({
       code,
-      user_a_name:   name,
-      user_a_songs:  songMeta,
-      user_a_avatar: State.avatarUrl || null,
-      status:        'waiting',
-      listener_count: 1,
+      user_a_name: name,
+      user_a_songs: songMeta,
+      user_a_avatar: State.avatarUrl,
+      status: 'waiting',
+      playback_state: null,
+      created_at: new Date().toISOString(),
     });
+
     if (error) throw error;
 
-    // Cache locally
-    LS.save('session', { code, slot: 'A', name, songs: songMeta });
+    State.shareLink = `${location.origin}${location.pathname}?room=${code}`;
 
     setLoading(false);
     App._showWaiting(code, name);
     App._subscribeRoom(code);
+    App._setupPresence(code);
   },
 
   async _joinRoom(name) {
     const code = State.roomCode;
+
     const { data, error } = await sb.from('rooms').select('*').eq('code', code).single();
-    if (error || !data) throw new Error('Room not found. Check the code!');
-    if (data.status === 'playing') {
-      // Allow as observer/listener
-      await App._joinAsListener(data, name);
-      return;
+
+    if (error || !data) throw new Error('Room not found');
+    if (data.status === 'ended') throw new Error('This blend already ended');
+    if (data.user_b_name && data.status === 'playing') {
+      throw new Error('Room already has 2 main users');
     }
 
-    const songMeta = State.songs.map(s => ({ name: s.name, duration: s.duration }));
+    const songMeta = await App._uploadSongs('B');
 
     const { error: err2 } = await sb.from('rooms').update({
-      user_b_name:   name,
-      user_b_songs:  songMeta,
-      user_b_avatar: State.avatarUrl || null,
-      status:        'playing',
-      listener_count: 2,
+      user_b_name: name,
+      user_b_songs: songMeta,
+      user_b_avatar: State.avatarUrl,
+      status: 'playing',
     }).eq('code', code);
+
     if (err2) throw err2;
 
-    LS.save('session', { code, slot: 'B', name, songs: songMeta });
-
     setLoading(false);
-    State.roomData = { ...data, user_b_name: name, user_b_songs: songMeta };
+
+    State.roomData = {
+      ...data,
+      user_b_name: name,
+      user_b_songs: songMeta,
+      status: 'playing',
+    };
+
     App._subscribeRoom(code);
+    App._setupPresence(code);
     Player.start(State.roomData, 'B');
   },
 
-  async _joinAsListener(roomData, name) {
-    // Listener — no songs to add, just listen/sync
-    State.userId = 'listener';
-    State.listenerId = 'L_' + Date.now();
-    const newCount = (roomData.listener_count || 2) + 1;
-    await sb.from('rooms').update({ listener_count: newCount }).eq('code', roomData.code).catch(() => {});
+  async _uploadSongs(slot) {
+    const meta = [];
 
-    LS.save('session', { code: roomData.code, slot: 'listener', name });
-    setLoading(false);
-    toast(`Joined as listener — welcome, ${name}!`);
-    State.roomData = roomData;
-    App._subscribeRoom(roomData.code);
-    // Start player in listener-only mode (no songs from this user)
-    Player.start(roomData, 'listener', name);
+    for (const song of State.songs) {
+      if (!song.file) continue;
+
+      const safeName = song.name.replace(/[^\w\s.-]/g, '').slice(0, 80);
+      const key = `${State.roomCode}/${slot}/${Date.now()}_${safeName}`;
+
+      const { error } = await sb.storage.from(STORAGE_BUCKET).upload(key, song.file, {
+        contentType: song.file.type || 'audio/mpeg',
+        upsert: true,
+      });
+
+      if (error) throw error;
+
+      const { data: urlData } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(key);
+
+      meta.push({
+        name: song.name,
+        duration: song.duration || 0,
+        url: urlData.publicUrl,
+        storageKey: key,
+      });
+    }
+
+    return meta;
   },
 
   _showWaiting(code, name) {
     document.getElementById('room-code-display').textContent = code;
     document.getElementById('you-name-label').textContent = name;
+
     const avEl = document.getElementById('you-av-small');
-    if (State.avatarUrl) {
-      avEl.innerHTML = `<img src="${State.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" />`;
-    } else {
-      avEl.textContent = initials(name);
-    }
+    avEl.textContent = initials(name);
+
+    App._injectShareUI();
+
     showScreen('screen-waiting');
   },
 
+  _injectShareUI() {
+    if (document.getElementById('share-link-btn')) return;
+
+    const card = document.querySelector('.room-card');
+
+    const btn = document.createElement('button');
+    btn.id = 'share-link-btn';
+    btn.className = 'copy-btn';
+    btn.style.marginTop = '10px';
+    btn.textContent = 'Copy share link';
+    btn.onclick = App.copyShareLink;
+
+    card.appendChild(btn);
+  },
+
+  _injectEndButton() {
+    if (document.getElementById('end-blend-btn')) return;
+
+    const top = document.querySelector('.player-top');
+
+    const btn = document.createElement('button');
+    btn.id = 'end-blend-btn';
+    btn.className = 'copy-btn';
+    btn.textContent = 'End Blend';
+    btn.onclick = App.endBlend;
+
+    top.appendChild(btn);
+  },
+
   _subscribeRoom(code) {
-    if (State.channel) {
-      sb.removeChannel(State.channel);
-    }
-    State.channel = sb.channel(`room:${code}`)
+    if (State.channel) sb.removeChannel(State.channel);
+
+    State.channel = sb.channel(`room-db-${code}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -285,486 +277,426 @@ const App = {
         const room = payload.new;
         State.roomData = room;
 
-        // Update listener count everywhere
-        App._updateListenerCount(room.listener_count || 2);
-
-        if (room.status === 'playing' && State.userId === 'A') {
-          // Friend joined!
-          const chip = document.getElementById('friend-chip');
-          chip.classList.remove('faded');
-          chip.classList.add('arrived');
-          const avEl = chip.querySelector('.member-avatar');
-          if (room.user_b_avatar) {
-            avEl.innerHTML = `<img src="${room.user_b_avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" />`;
-          } else {
-            avEl.textContent = initials(room.user_b_name);
-          }
-          chip.querySelector('span:last-child').textContent = room.user_b_name;
-          setTimeout(() => Player.start(room, 'A'), 1000);
-        }
-
-        // Room closed by other user
         if (room.status === 'ended') {
-          App._onRoomEnded(false);
+          toast('Blend ended');
+          Player.stop();
+          showScreen('screen-onboard');
           return;
         }
 
-        // Sync playback state
+        if (room.status === 'playing' && State.userId === 'A' && !Player.active) {
+          const chip = document.getElementById('friend-chip');
+          chip.classList.remove('faded');
+          chip.classList.add('arrived');
+          chip.querySelector('.member-avatar').textContent = initials(room.user_b_name);
+          chip.querySelector('span:last-child').textContent = room.user_b_name;
+
+          setTimeout(() => Player.start(room, 'A'), 800);
+        }
+
         if (room.playback_state && Player.active) {
           Player.syncState(room.playback_state);
         }
       })
-      .on('postgres_changes', {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'rooms',
-        filter: `code=eq.${code}`,
-      }, () => {
-        App._onRoomEnded(false);
-      })
       .subscribe();
   },
 
-  _updateListenerCount(count) {
-    document.getElementById('listener-count-wrap') &&
-      (document.getElementById('listener-count-wrap').style.display = count > 2 ? '' : 'none');
-    const lc = document.getElementById('listener-count');
-    if (lc) lc.textContent = count;
-    const plc = document.getElementById('player-listener-count');
-    if (plc) plc.textContent = count;
-  },
+  _setupPresence(code) {
+    if (State.presenceChannel) sb.removeChannel(State.presenceChannel);
 
-  // ── Sharing ──────────────────────────────────────
-  async shareLink() {
-    const url = buildShareUrl(State.roomCode);
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Join my Blend room!',
-          text: `Join my music blend room with code ${State.roomCode}`,
-          url,
-        });
-        return;
-      } catch (e) { /* fallthrough */ }
-    }
-    // Clipboard fallback
-    try {
-      await navigator.clipboard.writeText(url);
-      toast('🔗 Invite link copied!');
-    } catch (e) {
-      toast(`Share this: ${url}`);
-    }
+    State.presenceChannel = sb.channel(`presence-${code}`, {
+      config: { presence: { key: `${State.userId}-${Date.now()}` } },
+    });
+
+    State.presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = State.presenceChannel.presenceState();
+        const count = Object.keys(state).length;
+        if (count > 1) toast(`${count} devices online`, 1200);
+      })
+      .subscribe(async status => {
+        if (status === 'SUBSCRIBED') {
+          await State.presenceChannel.track({
+            name: State.userName,
+            slot: State.userId,
+            onlineAt: Date.now(),
+          });
+        }
+      });
   },
 
   copyCode() {
     const code = State.roomCode;
-    navigator.clipboard?.writeText(code).catch(() => {});
-    const btn = document.getElementById('copy-btn');
-    btn.classList.add('copied');
-    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
-    toast(`Code ${code} copied!`);
-    setTimeout(() => {
-      btn.classList.remove('copied');
-      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy code`;
-    }, 2000);
+    navigator.clipboard?.writeText(code);
+    toast(`Code ${code} copied`);
   },
 
-  // ── Leave / End room ─────────────────────────────
-  leaveRoom() {
-    App.showConfirm(
-      'Leave blend?',
-      State.userId === 'A' ? 'This will end the room for everyone.' : 'You\'ll leave the blend.',
-      async () => {
-        await App._cleanupOnLeave(true);
-      }
-    );
+  copyShareLink() {
+    const link = `${location.origin}${location.pathname}?room=${State.roomCode}`;
+    navigator.clipboard?.writeText(link);
+    toast('Share link copied');
   },
 
-  showConfirm(title, msg, onOk) {
-    document.getElementById('confirm-title').textContent = title;
-    document.getElementById('confirm-msg').textContent = msg;
-    document.getElementById('confirm-ok-btn').onclick = onOk;
-    document.getElementById('confirm-dialog').classList.remove('hidden');
-  },
+  async endBlend() {
+    if (!State.roomData) return;
 
-  hideConfirm() {
-    document.getElementById('confirm-dialog').classList.add('hidden');
-  },
+    setLoading(true, 'Ending blend…');
 
-  async _cleanupOnLeave(navigate = true) {
-    App.hideConfirm();
-    Player.stop();
+    try {
+      await App._deleteRoomFiles(State.roomData);
 
-    if (State.roomCode) {
-      try {
-        if (State.userId === 'A') {
-          // Host leaves — delete room entirely (cascades everything)
-          await sb.from('rooms').update({ status: 'ended' }).eq('code', State.roomCode);
-          // Small delay then hard delete
-          setTimeout(async () => {
-            await sb.from('rooms').delete().eq('code', State.roomCode).catch(() => {});
-          }, 1500);
-        } else if (State.userId === 'B') {
-          // User B leaves — mark as ended
-          await sb.from('rooms').update({ status: 'ended' }).eq('code', State.roomCode).catch(() => {});
-        } else if (State.userId === 'listener') {
-          // Decrement count
-          const count = (State.roomData?.listener_count || 2) - 1;
-          await sb.from('rooms').update({ listener_count: Math.max(2, count) }).eq('code', State.roomCode).catch(() => {});
-        }
-      } catch (e) { console.warn('Cleanup error', e); }
-    }
+      await sb.from('rooms').update({
+        status: 'ended',
+        user_a_songs: [],
+        user_b_songs: [],
+        playback_state: null,
+        ended_at: new Date().toISOString(),
+        ended_by: State.userName,
+      }).eq('code', State.roomCode);
 
-    // Clear local state
-    LS.remove('session');
-    if (State.channel) {
-      sb.removeChannel(State.channel);
-      State.channel = null;
-    }
-
-    if (navigate) {
-      // Reset all state
-      State.roomCode  = null;
-      State.userId    = null;
-      State.userName  = null;
-      State.songs     = [];
-      State.roomData  = null;
-      document.getElementById('song-list').innerHTML = '';
-      document.getElementById('name-input').value = '';
-      document.getElementById('avatar-preview').classList.add('hidden');
-      document.getElementById('avatar-placeholder').style.display = '';
-      App._checkReady();
+      setLoading(false);
+      toast('Blend ended and songs deleted');
+      Player.stop();
       showScreen('screen-onboard');
+    } catch (e) {
+      console.error(e);
+      setLoading(false);
+      toast('Could not fully delete: ' + e.message);
     }
   },
 
-  _onRoomEnded(wasUs) {
-    if (!wasUs) {
-      toast('The blend has ended 👋');
+  async _deleteRoomFiles(room) {
+    const paths = [];
+
+    [...(room.user_a_songs || []), ...(room.user_b_songs || [])].forEach(s => {
+      if (s.storageKey) paths.push(s.storageKey);
+    });
+
+    if (paths.length > 0) {
+      const { error } = await sb.storage.from(STORAGE_BUCKET).remove(paths);
+      if (error) console.warn(error.message);
     }
-    Player.stop();
-    LS.remove('session');
-    if (State.channel) {
-      sb.removeChannel(State.channel);
-      State.channel = null;
-    }
-    State.roomCode = null;
-    State.userId   = null;
-    State.songs    = [];
-    State.roomData = null;
-    document.getElementById('song-list').innerHTML = '';
-    document.getElementById('name-input').value = '';
-    document.getElementById('avatar-preview').classList.add('hidden');
-    document.getElementById('avatar-placeholder').style.display = '';
-    App._checkReady();
-    setTimeout(() => showScreen('screen-onboard'), 800);
   },
 
   _checkReady() {
     const name = (document.getElementById('name-input')?.value || '').trim();
-    const btn  = document.getElementById('btn-proceed');
-    // Listener mode doesn't need songs
-    const needSongs = State.userId !== 'listener';
-    if (btn) btn.disabled = !(name && (State.songs.length > 0 || !needSongs));
+    const btn = document.getElementById('btn-proceed');
+    if (btn) btn.disabled = !(name && State.songs.length > 0);
   },
 };
 
-// ── Setup UI events ──────────────────────────────────
+// UI events
 document.getElementById('name-input').addEventListener('input', App._checkReady);
 
 document.getElementById('avatar-file').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
+
   const reader = new FileReader();
   reader.onload = ev => {
     State.avatarUrl = ev.target.result;
     const prev = document.getElementById('avatar-preview');
+    const ph = document.getElementById('avatar-placeholder');
+
     prev.src = ev.target.result;
     prev.classList.remove('hidden');
-    document.getElementById('avatar-placeholder').style.display = 'none';
+    ph.style.display = 'none';
   };
+
   reader.readAsDataURL(file);
 });
 
 document.getElementById('song-file').addEventListener('change', e => {
   const files = Array.from(e.target.files);
+
   files.forEach(file => {
     const url = URL.createObjectURL(file);
     const audio = new Audio();
     audio.src = url;
-    const addSong = (dur) => {
-      const song = { name: stripExt(file.name), duration: dur, file, localUrl: url };
-      State.songs.push(song);
+
+    audio.addEventListener('loadedmetadata', () => {
+      State.songs.push({
+        name: stripExt(file.name),
+        duration: audio.duration,
+        file,
+        localUrl: url,
+      });
+
       renderSongList();
       App._checkReady();
-    };
-    audio.addEventListener('loadedmetadata', () => addSong(audio.duration));
-    audio.addEventListener('error', () => addSong(0));
+    });
+
+    audio.addEventListener('error', () => {
+      State.songs.push({
+        name: stripExt(file.name),
+        duration: 0,
+        file,
+        localUrl: url,
+      });
+
+      renderSongList();
+      App._checkReady();
+    });
   });
+
   e.target.value = '';
 });
-
-function renderSongList() {
-  const list = document.getElementById('song-list');
-  list.innerHTML = State.songs.map((s, i) => `
-    <div class="song-item" id="si-${i}">
-      <div class="song-thumb">♪</div>
-      <div class="song-info">
-        <div class="song-name">${s.name}</div>
-        <div class="song-dur">${s.duration ? fmtTime(s.duration) : '—'}</div>
-      </div>
-      <button class="song-remove" onclick="removeSong(${i})" aria-label="Remove">×</button>
-    </div>
-  `).join('');
-}
-
-function removeSong(i) {
-  URL.revokeObjectURL(State.songs[i]?.localUrl);
-  State.songs.splice(i, 1);
-  renderSongList();
-  App._checkReady();
-}
 
 document.getElementById('join-code-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') App.showJoin();
 });
 
-// ── Player ───────────────────────────────────────────
+function renderSongList() {
+  const list = document.getElementById('song-list');
+
+  list.innerHTML = State.songs.map((s, i) => `
+    <div class="song-item">
+      <div class="song-thumb">♪</div>
+      <div class="song-info">
+        <div class="song-name">${s.name}</div>
+        <div class="song-dur">${s.duration ? fmtTime(s.duration) : '—'}</div>
+      </div>
+      <button class="song-remove" onclick="removeSong(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function removeSong(i) {
+  State.songs.splice(i, 1);
+  renderSongList();
+  App._checkReady();
+}
+
 const Player = {
-  active:      false,
-  queue:       [],
-  idx:         0,
-  audio:       new Audio(),
-  isPlaying:   false,
-  mySlot:      'A',
-  myName:      '',
-  _eventsSetup: false,
+  active: false,
+  queue: [],
+  idx: 0,
+  audio: new Audio(),
+  isPlaying: false,
+  mySlot: 'A',
+  syncTimer: null,
+  ignoreSync: false,
 
-  start(room, mySlot, listenerName) {
-    Player.active  = true;
-    Player.mySlot  = mySlot;
-    Player.myName  = listenerName || (mySlot === 'A' ? room.user_a_name : room.user_b_name) || 'You';
+  start(room, mySlot) {
+    Player.active = true;
+    Player.mySlot = mySlot;
 
-    // Build interleaved queue
     const aS = (room.user_a_songs || []).map(s => ({ ...s, owner: room.user_a_name, slot: 'A' }));
     const bS = (room.user_b_songs || []).map(s => ({ ...s, owner: room.user_b_name, slot: 'B' }));
+
     Player.queue = [];
+
     const len = Math.max(aS.length, bS.length);
     for (let i = 0; i < len; i++) {
       if (aS[i]) Player.queue.push(aS[i]);
       if (bS[i]) Player.queue.push(bS[i]);
     }
 
-    // Names
-    const myName = mySlot === 'listener' ? listenerName : (mySlot === 'A' ? room.user_a_name : room.user_b_name);
-    const frName = mySlot === 'A' ? room.user_b_name : (mySlot === 'B' ? room.user_a_name : room.user_a_name);
-    document.getElementById('player-you-name').textContent    = myName || 'You';
-    document.getElementById('player-friend-name').textContent = frName || 'Friend';
+    if (Player.queue.length === 0) {
+      toast('No songs found');
+      return;
+    }
+
+    document.getElementById('player-you-name').textContent =
+      mySlot === 'A' ? room.user_a_name : room.user_b_name;
+
+    document.getElementById('player-friend-name').textContent =
+      mySlot === 'A' ? room.user_b_name : room.user_a_name;
 
     showScreen('screen-player');
+    App._injectEndButton();
+
     Player._setupAudioEvents();
     Player._loadTrack(0);
     Player._play();
-    Player._renderQueue();
 
-    // If there's a saved playback state, sync to it
-    if (room.playback_state) {
-      setTimeout(() => Player.syncState(room.playback_state, true), 800);
-    }
+    clearInterval(Player.syncTimer);
+    Player.syncTimer = setInterval(() => {
+      if (Player.active && Player.isPlaying) Player._broadcastState('sync');
+    }, 1200);
   },
 
   stop() {
     Player.active = false;
     Player.audio.pause();
     Player.audio.src = '';
-    Player.isPlaying = false;
-    Player.queue = [];
-    Player.idx = 0;
+    clearInterval(Player.syncTimer);
   },
 
   _loadTrack(i) {
-    if (Player.queue.length === 0) return;
     if (i >= Player.queue.length) i = 0;
+    if (i < 0) i = Player.queue.length - 1;
+
     Player.idx = i;
+
     const track = Player.queue[i];
-    if (!track) return;
-
-    // Use local file if available, otherwise no audio (listeners can't play unless host)
     const localSong = State.songs.find(s => s.name === track.name);
-    if (localSong?.localUrl) {
-      Player.audio.src = localSong.localUrl;
-    } else if (track.url) {
-      Player.audio.src = track.url;
-    } else {
-      // Listener with no local file — muted/sync only
-      Player.audio.src = '';
-    }
 
+    Player.audio.src = localSong?.localUrl || track.url;
     Player.audio.load();
 
-    const isYou = (track.slot === Player.mySlot);
-    document.getElementById('track-name').textContent  = track.name;
-    document.getElementById('track-owner').textContent = isYou ? 'From your library' : `From ${track.owner}'s library`;
+    const isYou = track.slot === Player.mySlot;
+
+    document.getElementById('track-name').textContent = track.name;
+    document.getElementById('track-owner').textContent =
+      isYou ? 'From your library' : `From ${track.owner}`;
 
     const art = document.getElementById('art-inner');
     const tag = document.getElementById('owner-tag');
+
     art.className = 'art-inner spinning ' + (isYou ? 'you-art' : 'friend-art');
     tag.className = 'owner-tag ' + (isYou ? 'you-tag' : 'friend-tag');
     tag.textContent = isYou ? 'You' : track.owner;
 
     document.getElementById('progress-fill').style.width = '0%';
     document.getElementById('time-current').textContent = '0:00';
-    document.getElementById('time-total').textContent   = fmtTime(track.duration || 0);
+    document.getElementById('time-total').textContent = fmtTime(track.duration || 0);
 
     Player._renderQueue();
-    Player._broadcastState();
   },
 
   _setupAudioEvents() {
-    if (Player._eventsSetup) return;
-    Player._eventsSetup = true;
+    if (Player.audio._ready) return;
+    Player.audio._ready = true;
 
     Player.audio.addEventListener('timeupdate', () => {
       if (!Player.audio.duration) return;
+
       const pct = (Player.audio.currentTime / Player.audio.duration) * 100;
       document.getElementById('progress-fill').style.width = pct.toFixed(2) + '%';
       document.getElementById('time-current').textContent = fmtTime(Player.audio.currentTime);
-      document.getElementById('time-total').textContent   = fmtTime(Player.audio.duration);
+      document.getElementById('time-total').textContent = fmtTime(Player.audio.duration);
     });
 
     Player.audio.addEventListener('ended', () => Player.next());
 
     Player.audio.addEventListener('error', () => {
-      // Silently skip if no audio source (listener mode)
-      if (Player.audio.src && Player.audio.src !== window.location.href) {
-        toast('Could not load audio — skipping');
-        setTimeout(() => Player.next(), 1000);
-      }
+      toast('Audio failed, skipping');
+      setTimeout(() => Player.next(), 800);
     });
   },
 
   _play() {
-    if (Player.audio.src) {
-      Player.audio.play().catch(e => console.warn('Autoplay blocked:', e));
-    }
+    Player.audio.play().catch(() => {
+      toast('Tap play to start audio');
+    });
+
     Player.isPlaying = true;
+
     document.getElementById('icon-play').classList.add('hidden');
     document.getElementById('icon-pause').classList.remove('hidden');
     document.getElementById('art-inner').classList.add('spinning');
-    App._hidePauseBanner();
   },
 
-  _pause(pausedByName) {
+  _pause() {
     Player.audio.pause();
     Player.isPlaying = false;
+
     document.getElementById('icon-play').classList.remove('hidden');
     document.getElementById('icon-pause').classList.add('hidden');
     document.getElementById('art-inner').classList.remove('spinning');
-    if (pausedByName) {
-      App._showPauseBanner(pausedByName);
-    }
   },
 
   togglePlay() {
     if (Player.isPlaying) {
       Player._pause();
+      Player._broadcastState('pause');
     } else {
       Player._play();
+      Player._broadcastState('play');
     }
-    Player._broadcastState();
   },
 
   next() {
-    if (Player.queue.length === 0) return;
-    Player._loadTrack((Player.idx + 1) % Player.queue.length);
+    Player._loadTrack(Player.idx + 1);
     if (Player.isPlaying) Player._play();
+    Player._broadcastState('next');
   },
 
   prev() {
     if (Player.audio.currentTime > 3) {
       Player.audio.currentTime = 0;
-      Player._broadcastState();
+      Player._broadcastState('seek');
       return;
     }
-    if (Player.queue.length === 0) return;
-    Player._loadTrack((Player.idx - 1 + Player.queue.length) % Player.queue.length);
+
+    Player._loadTrack(Player.idx - 1);
     if (Player.isPlaying) Player._play();
+    Player._broadcastState('prev');
   },
 
   _renderQueue() {
     const list = document.getElementById('queue-list');
-    if (!list) return;
-    const upcoming = Player.queue.slice(Player.idx + 1, Player.idx + 6);
-    if (upcoming.length === 0) {
-      list.innerHTML = `<div style="font-size:13px;color:var(--text3);padding:8px 0;">End of queue — will loop 🔁</div>`;
+    const upcoming = Player.queue.slice(Player.idx + 1, Player.idx + 5);
+
+    if (!upcoming.length) {
+      list.innerHTML = `<div style="font-size:13px;color:var(--text3);padding:8px 0;">End of queue — will loop</div>`;
       return;
     }
+
     list.innerHTML = upcoming.map(t => {
       const isYou = t.slot === Player.mySlot;
-      const color = isYou ? 'var(--you)' : 'var(--friend)';
-      return `<div class="queue-item">
-        <div class="queue-dot" style="background:${color}"></div>
-        <div class="queue-song">${t.name}</div>
-        <div class="queue-owner">${isYou ? 'You' : t.owner}</div>
-      </div>`;
+      return `
+        <div class="queue-item">
+          <div class="queue-dot"></div>
+          <div class="queue-song">${t.name}</div>
+          <div class="queue-owner">${isYou ? 'You' : t.owner}</div>
+        </div>
+      `;
     }).join('');
   },
 
-  async _broadcastState() {
-    if (!State.roomCode) return;
+  async _broadcastState(action = 'sync') {
+    if (!State.roomCode || Player.ignoreSync) return;
+
     const state = {
-      idx:         Player.idx,
-      playing:     Player.isPlaying,
-      time:        Player.audio.currentTime || 0,
-      updatedBy:   State.userId,
-      updatedName: State.userName || Player.myName,
-      ts:          Date.now(),
+      idx: Player.idx,
+      playing: Player.isPlaying,
+      time: Player.audio.currentTime || 0,
+      action,
+      byName: State.userName,
+      updatedBy: State.userId,
+      updatedAt: Date.now(),
     };
-    await sb.from('rooms')
-      .update({ playback_state: state })
-      .eq('code', State.roomCode)
-      .catch(() => {});
+
+    await sb.from('rooms').update({
+      playback_state: state,
+    }).eq('code', State.roomCode);
   },
 
-  syncState(ps, force = false) {
-    if (!Player.active) return;
-    // Don't sync our own broadcasts (unless forced on join)
-    if (!force && ps.updatedBy === State.userId) return;
+  syncState(ps) {
+    if (!ps || ps.updatedBy === State.userId) return;
 
-    // Track changed
-    if (ps.idx !== undefined && ps.idx !== Player.idx) {
+    Player.ignoreSync = true;
+
+    if (typeof ps.idx === 'number' && ps.idx !== Player.idx) {
       Player._loadTrack(ps.idx);
     }
 
-    // Sync time if off by >2s
-    if (ps.time !== undefined && Math.abs(Player.audio.currentTime - ps.time) > 2) {
-      Player.audio.currentTime = ps.time;
+    if (Math.abs(Player.audio.currentTime - ps.time) > 1.5) {
+      Player.audio.currentTime = ps.time || 0;
     }
 
     if (ps.playing && !Player.isPlaying) {
       Player._play();
+      if (ps.action === 'play') toast(`${ps.byName} resumed song`);
     }
+
     if (!ps.playing && Player.isPlaying) {
-      // Show who paused it (not us)
-      const pauserName = ps.updatedName || 'Your friend';
-      Player._pause(pauserName !== State.userName ? pauserName : null);
+      Player._pause();
+      if (ps.action === 'pause') toast(`${ps.byName} paused song`);
     }
+
+    setTimeout(() => {
+      Player.ignoreSync = false;
+    }, 300);
   },
 };
 
-// ── Pause banner helpers ─────────────────────────────
-App._showPauseBanner = function(name) {
-  const banner = document.getElementById('pause-banner');
-  if (!banner) return;
-  document.getElementById('pause-banner-text').textContent = `⏸ ${name} paused the blend`;
-  banner.classList.remove('hidden');
-  clearTimeout(App._pauseBannerTimer);
-  App._pauseBannerTimer = setTimeout(() => App._hidePauseBanner(), 4000);
-};
-App._hidePauseBanner = function() {
-  const banner = document.getElementById('pause-banner');
-  if (banner) banner.classList.add('hidden');
-};
+window.addEventListener('beforeunload', () => {
+  if (State.presenceChannel) {
+    State.presenceChannel.untrack();
+  }
+});
 
-// ── Init ──────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => App.init());
+App.init();
