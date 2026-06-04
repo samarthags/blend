@@ -1,208 +1,399 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blend — Real Time Music</title>
-  <link rel="stylesheet" href="style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Blend — Share Your Taste</title>
+
+<meta name="theme-color" content="#0a0a0a">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-  <div id="screen-onboard" class="screen active">
-    <div class="onboard-hero">
-      <div class="logo-mark">B</div>
-      <h1>blend</h1>
-      <p class="tagline">Two people. One synced queue.<br>Real-time music vibe.</p>
+<!-- LOADING -->
+
+<div id="loading-screen">
+    <div class="loading-logo">
+        <i class="fa-solid fa-wave-square"></i>
+    </div>
+    <div class="loading-text">Preparing your blend...</div>
+</div>
+
+<!-- HOME -->
+
+<section id="screen-home" class="screen active">
+
+```
+<div class="hero">
+
+    <div class="hero-logo">
+        <i class="fa-solid fa-wave-square"></i>
     </div>
 
-    <div class="onboard-actions">
-      <button class="btn-main" onclick="App.showCreate()">Create Blend Room</button>
+    <h1>blend</h1>
 
-      <div class="divider-or"><span>or</span></div>
+    <p class="hero-sub">
+        Share your music taste with someone.<br>
+        One blend. Two people. Real-time.
+    </p>
 
-      <div class="join-row">
-        <input id="join-code-input" type="text" maxlength="6" inputmode="numeric" placeholder="Enter 6 digit code" autocomplete="off" />
-        <button class="btn-join" onclick="App.showJoin()">Join</button>
-      </div>
+    <button id="createBlendBtn" class="primary-btn">
+        <i class="fa-solid fa-link"></i>
+        Create Blend
+    </button>
+
+</div>
+```
+
+</section>
+
+<!-- SETUP -->
+
+<section id="screen-setup" class="screen">
+
+```
+<div class="topbar">
+    <button class="icon-btn" onclick="App.backHome()">
+        <i class="fa-solid fa-arrow-left"></i>
+    </button>
+
+    <span>Create Blend</span>
+</div>
+
+<div class="setup-container">
+
+    <div class="section-title">
+        <i class="fa-solid fa-user"></i>
+        Your Name
     </div>
-  </div>
 
-  <div id="screen-setup" class="screen">
-    <div class="screen-header">
-      <button class="back-btn" onclick="App.goBack()">←</button>
-      <span class="screen-title" id="setup-title">Create your profile</span>
+    <input
+    id="nameInput"
+    type="text"
+    maxlength="24"
+    placeholder="Your name">
+
+    <div class="section-title">
+        <i class="fa-solid fa-music"></i>
+        Your Songs
     </div>
 
-    <div class="setup-body">
-      <input type="file" id="avatar-file" hidden />
-      <img id="avatar-preview" class="hidden" alt="" />
-      <div id="avatar-placeholder" hidden></div>
+    <div class="upload-card"
+         onclick="document.getElementById('songInput').click()">
 
-      <div class="field">
-        <label class="field-label">Your name</label>
-        <input id="name-input" class="field-input" type="text" maxlength="24" placeholder="e.g. Samartha" />
-      </div>
+        <i class="fa-solid fa-cloud-arrow-up"></i>
 
-      <div class="field">
-        <label class="field-label">Add your songs</label>
-        <div class="upload-zone" onclick="document.getElementById('song-file').click()">
-          <div class="upload-icon">♫</div>
-          <div class="upload-text">Pick songs from your device</div>
-          <div class="upload-sub">MP3 · M4A · WAV · FLAC</div>
+        <h3>Add Songs</h3>
+
+        <p>
+            MP3 · WAV · FLAC · M4A
+        </p>
+
+    </div>
+
+    <input
+    id="songInput"
+    type="file"
+    accept="audio/*"
+    multiple
+    hidden>
+
+    <div id="storageInfo" class="storage-info">
+        0 songs selected
+    </div>
+
+    <div id="songList" class="song-list"></div>
+
+    <button
+    id="continueBtn"
+    class="primary-btn"
+    disabled>
+
+        <i class="fa-solid fa-arrow-right"></i>
+        Continue
+
+    </button>
+
+</div>
+```
+
+</section>
+
+<!-- SHARE -->
+
+<section id="screen-share" class="screen">
+
+```
+<div class="share-wrapper">
+
+    <div class="success-icon">
+        <i class="fa-solid fa-check"></i>
+    </div>
+
+    <h2>Your Blend Is Ready</h2>
+
+    <p>
+        Share this link with your friend
+    </p>
+
+    <div id="shareLinkBox" class="share-link-box">
+        Loading...
+    </div>
+
+    <button id="copyLinkBtn" class="primary-btn">
+
+        <i class="fa-solid fa-copy"></i>
+
+        Copy Link
+
+    </button>
+
+</div>
+```
+
+</section>
+
+<!-- PLAYER -->
+
+<section id="screen-player" class="screen">
+
+```
+<div class="player-header">
+
+    <div class="player-title">
+
+        <i class="fa-solid fa-wave-square"></i>
+
+        <span id="blendNames">
+            Blend
+        </span>
+
+    </div>
+
+    <div class="online-status">
+
+        <span class="online-dot"></span>
+
+        <span id="onlineText">
+            Online
+        </span>
+
+    </div>
+
+</div>
+
+<div class="player-main">
+
+    <div class="vinyl">
+
+        <div class="vinyl-center">
+
+            <i class="fa-solid fa-music"></i>
+
         </div>
-        <input id="song-file" type="file" accept="audio/*" multiple hidden />
-      </div>
 
-      <div id="storage-warning" class="mini-info">Cloud use: 0 MB. Deleted after blend ends.</div>
-
-      <div id="song-list" class="song-list"></div>
-
-      <button class="btn-main" id="btn-proceed" disabled onclick="App.proceed()">
-        <span id="btn-proceed-label">Continue →</span>
-      </button>
-    </div>
-  </div>
-
-  <div id="screen-waiting" class="screen">
-    <div class="screen-header">
-      <button class="back-btn" onclick="App.goBack()">←</button>
-      <span class="screen-title">Your Blend Room</span>
     </div>
 
-    <div class="waiting-body">
-      <div class="room-card">
-        <div class="room-card-label">share this code</div>
-        <div class="room-code" id="room-code-display">------</div>
+    <h2 id="trackTitle">
+        Waiting...
+    </h2>
 
-        <button class="copy-btn" onclick="App.copyCode()">Copy Code</button>
-        <button class="copy-btn" onclick="App.copyShareLink()">Copy Share Link</button>
-      </div>
+    <p class="track-sub">
 
-      <div class="waiting-status">
-        <div class="pulse-ring"></div>
-        <div class="waiting-text">Waiting for your friend…</div>
-        <div class="waiting-sub">Send code or link</div>
-      </div>
+        This is your blend.<br>
 
-      <div class="members-row">
-        <div class="member-chip you-chip">
-          <div class="member-avatar you-av" id="you-av-small">?</div>
-          <span id="you-name-label">You</span>
+        Playing your favorite songs in a smart order.
+
+    </p>
+
+    <div class="progress">
+
+        <div id="progressFill"></div>
+
+    </div>
+
+    <div class="time-row">
+
+        <span id="currentTime">
+            0:00
+        </span>
+
+        <span id="totalTime">
+            0:00
+        </span>
+
+    </div>
+
+    <button
+    id="pauseBtn"
+    class="pause-btn">
+
+        <i class="fa-solid fa-circle-pause"></i>
+
+        Pause Blend
+
+    </button>
+
+</div>
+
+<div class="up-next-card">
+
+    <div class="up-next-title">
+
+        <i class="fa-solid fa-list-music"></i>
+
+        Up Next
+
+    </div>
+
+    <div id="upNextList"></div>
+
+</div>
+
+<button id="chatFab" class="chat-fab">
+
+    <i class="fa-solid fa-comments"></i>
+
+</button>
+
+<button id="reactionFab" class="reaction-fab">
+
+    <i class="fa-solid fa-heart"></i>
+
+</button>
+
+<button id="endBlendBtn" class="end-blend-btn">
+
+    <i class="fa-solid fa-power-off"></i>
+
+    End Blend
+
+</button>
+```
+
+</section>
+
+<!-- CHAT MODAL -->
+
+<div id="chatModal" class="modal">
+
+```
+<div class="modal-content">
+
+    <div class="modal-header">
+
+        <div>
+
+            <i class="fa-solid fa-comments"></i>
+
+            Blend Chat
+
         </div>
 
-        <div class="plus-symbol">+</div>
+        <button id="closeChat">
 
-        <div class="member-chip friend-chip faded" id="friend-chip">
-          <div class="member-avatar friend-av">?</div>
-          <span>Waiting…</span>
-        </div>
-      </div>
-    </div>
-  </div>
+            <i class="fa-solid fa-xmark"></i>
 
-  <div id="screen-player" class="screen">
-    <div class="player-top">
-      <div class="player-blend-label">
-        <span class="blend-dot you-dot"></span>
-        <span id="player-you-name">You</span>
-        <span class="blend-x">✕</span>
-        <span id="player-friend-name">Friend</span>
-        <span class="blend-dot friend-dot"></span>
-      </div>
+        </button>
 
-      <div class="live-badge">● LIVE</div>
-      <button class="copy-btn" id="end-blend-btn" onclick="App.endBlend()">End Blend</button>
     </div>
 
-    <div class="sync-status" id="sync-status">Synced in real time</div>
-    <div id="live-activity">Live activity ready</div>
+    <div id="chatMessages"
+         class="chat-messages"></div>
 
-    <div class="blend-tools">
-      <button onclick="Player.voteSkip()">Vote Skip</button>
-      <button onclick="Player.toggleQueueMode()" id="queue-mode-btn">Balanced Queue</button>
+    <div id="typingIndicator"
+         class="typing-indicator"></div>
+
+    <div class="chat-input-row">
+
+        <input
+        id="chatInput"
+        type="text"
+        maxlength="120"
+        placeholder="Message...">
+
+        <button id="sendChatBtn">
+
+            <i class="fa-solid fa-paper-plane"></i>
+
+        </button>
+
     </div>
 
-    <div class="reaction-row">
-      <button onclick="Reactions.send('🔥')">🔥</button>
-      <button onclick="Reactions.send('❤️')">❤️</button>
-      <button onclick="Reactions.send('🚀')">🚀</button>
-      <button onclick="Reactions.send('😭')">😭</button>
-    </div>
+</div>
+```
 
-    <div id="reaction-float"></div>
+</div>
 
-    <div class="player-art">
-      <div class="art-inner" id="art-inner">
-        <div class="art-note">♫</div>
-      </div>
-      <div class="owner-tag" id="owner-tag">You</div>
-    </div>
+<!-- REACTIONS -->
 
-    <div class="player-meta">
-      <div class="now-playing-label">NOW PLAYING</div>
-      <div class="track-name" id="track-name">—</div>
-      <div class="track-owner" id="track-owner">from your blend</div>
-    </div>
+<div id="reactionPanel"
+     class="reaction-panel">
 
-    <div class="progress-wrap">
-      <span class="time-label" id="time-current">0:00</span>
-      <div class="progress-bar">
-        <div class="progress-fill" id="progress-fill"></div>
-      </div>
-      <span class="time-label" id="time-total">0:00</span>
-    </div>
+```
+<button data-reaction="heart">
+    <i class="fa-solid fa-heart"></i>
+</button>
 
-    <div class="controls">
-      <button class="ctrl" onclick="Player.prev()">⏮</button>
+<button data-reaction="fire">
+    <i class="fa-solid fa-fire"></i>
+</button>
 
-      <button class="ctrl ctrl-play" id="btn-play" onclick="Player.togglePlay()">
-        <span id="icon-play">▶</span>
-        <span id="icon-pause" class="hidden">⏸</span>
-      </button>
+<button data-reaction="bolt">
+    <i class="fa-solid fa-bolt"></i>
+</button>
 
-      <button class="ctrl" onclick="Player.next()">⏭</button>
-    </div>
+<button data-reaction="star">
+    <i class="fa-solid fa-star"></i>
+</button>
+```
 
-    <div class="blend-stats">
-      <div><span id="stats-total">0</span><small>Total songs</small></div>
-      <div><span id="stats-current">1</span><small>Current</small></div>
-      <div><span id="stats-mode">Balanced</span><small>Mode</small></div>
-    </div>
+</div>
 
-    <div class="queue-section">
-      <div class="queue-title">Up next</div>
-      <div id="queue-list" class="queue-list"></div>
-    </div>
+<div id="reactionContainer"></div>
 
-    <div class="chat-box">
-      <div class="queue-title">Mini Chat</div>
+<!-- CLEANUP -->
 
-      <div id="chat-messages"></div>
-      <div id="typing-status"></div>
+<div id="cleanupScreen"
+     class="cleanup-screen">
 
-      <div class="chat-input-row">
-        <input id="chat-input" type="text" maxlength="120" placeholder="Message your blend..." oninput="Chat.typing()" onkeydown="if(event.key==='Enter') Chat.send()" />
-        <button onclick="Chat.send()">Send</button>
-      </div>
-    </div>
+```
+<div class="cleanup-card">
 
-    <div id="cleanup-screen" class="hidden">
-      <h2>Blend ended</h2>
-      <p id="cleanup-text">Cleaning cloud files...</p>
-    </div>
-  </div>
+    <i class="fa-solid fa-trash"></i>
 
-  <div id="toast" class="toast"></div>
+    <h3>Ending Blend</h3>
 
-  <div id="loading" class="loading-overlay hidden">
-    <div class="loading-spinner"></div>
-    <div class="loading-text" id="loading-text">Connecting…</div>
-  </div>
+    <p id="cleanupText">
+        Cleaning cloud files...
+    </p>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+</div>
+```
+
+</div>
+
+<!-- TOAST -->
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script src="config.js"></script>
+
+<script src="app.js"></script>
+
 </body>
 </html>
