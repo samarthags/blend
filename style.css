@@ -767,3 +767,50 @@ h1 {
     flex-direction: column;
   }
 }
+
+
+.reaction-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.reaction-row button {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 20px;
+}
+
+#reaction-float {
+  position: fixed;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  z-index: 80;
+  pointer-events: none;
+}
+
+.floating-reaction {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: white;
+  color: black;
+  font-weight: 800;
+  animation: floatUp 1.8s ease forwards;
+}
+
+@keyframes floatUp {
+  from {
+    opacity: 1;
+    transform: translateY(20px) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-80px) scale(1.15);
+  }
+}
